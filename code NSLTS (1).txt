@@ -1,0 +1,312 @@
+# The following code generates nonlinear dataset with outliers and compares NLS and NLTS fits with 20% outliers 
+
+rm(list=ls())
+# Exact solution of nonlinear regression model
+b1=5.2771;b2=0.7596;b3=1.2792
+#
+# Define a function to generate two columns dataset:
+NonLinear = function(n) { 
+  x = runif(n,0,15) 
+  y = (700 / ((1+exp(b1-b2*x))**(1/b3))) + rnorm(n,0,1) 
+  data.frame(x,y) }
+#
+# Define a function to generate two columns outliers
+NL_Outliers = function(n, Lower, Upper) { 
+  x = rnorm(n, 1, 0.8) 
+  y = (700 / ((1+exp(b1-b2*x))**(1/b3))) + runif(n, Lower, Upper) 
+  data.frame(x,y) } 
+
+## Example: generate dataset and add 20% outliers to it
+#Inpute:
+
+n.org=400           # size of original dataset
+n.out=100           # size of outliers dataset (here, proportion is 100/500=20%)
+n=n.org+n.out                            # size of polluted dataset
+NL = NonLinear(n.org)                 # Generate dataset
+NLOO<- NL_Outliers(n.out, 5, 500.5) # Generate outliers
+NL[(n.org+1):n,]<-NLOO              # add outliers to dataset 
+NL                                             # see polluted dataset
+#Output:
+#              x         y
+#1    7.83473473 506.85543     # Starting of original dataset
+#.    .           .
+#.    .           .
+#399  4.60209977 153.13344
+#400 10.91277686 674.64313     # End of original dataset
+#401  3.11845373  76.21713     # Starting of outliers
+#.    .           .
+#.    .           .
+#575  1.74397305  436.84877    # End of outliers
+
+##To compare NLS with NLTS, perform the following code:
+# 
+# perform NLS of generated polluted dataset
+m.nls=nls(y ~ (700 / ((1+exp(b1-b2*x))**(1/b3))),
+          data = NL, start = list(b1=5, b2=0.75,b3=1.3))
+nls.coef <- coef(m.nls)
+nls.coef
+#Output:
+#       b1       b2       b3 
+# 22.68441  2.29532 11.32607 #(It does not correspond to exact solutions)
+#
+#
+# Now compute the breakdown point and perform NLTS using C-steps 
+
+phi=0.2                  # Trimming proportion
+h <- ceiling(n*(1-phi))  # Breakdown point
+
+# The following processes must be repeated 1000 times at least and conclude the optimal solution corresponds to minimum sum of h of ordered squared residuals 
+
+H <-sample(1:n,h, replace = T)
+data.trim <- NL[H,]
+nlts=nls(y~(699/((1+exp(b2-b3*x))**(1/b4))), start=list(b2=5, b3=0.75,b4=1.3),data=data.trim)
+re<-NL$y-(699/((1+exp(coef(nlts)[1]-coef(nlts)[2]*NL$x))**(1/coef(nlts)[3])))
+names(re)<- array(1:n)
+riord <-sort(abs(re))
+  
+repeat{# C-steps
+  s1=sum(riord[1:h]^2);s1
+  H <- as.numeric(names(riord[1:h]))
+  ds.trim <- NL[H,]
+  nlts <-nls(y~(699/((1+exp(b2-b3*x))**(1/b4))), start = list(b2=5, b3=0.75,b4=1.3),data=ds.trim)
+  re<-NL$y-(699/((1+exp(coef(nlts)[1]-coef(nlts)[2]*NL$x))**(1/coef(nlts)[3])))
+  names(re)<- array(1:n)
+  riord <- sort(abs(re))
+  s2=sum(riord[1:h]^2);s2
+  if(s1==s2){ # This is the threshold (stopping conditions)
+    break
+  }
+}
+coef(nlts)
+#Output:
+#     b1     b2     b3 
+# 5.2881 0.7604 1.2841    #(It is close to exact solution (5.277,0.759,1.279))
+#
+# Now plot the all solutions
+plot(NL[1:n.org,2]~NL[1:n.org,1],main=" ",
+     xlab="X", ylab="Y", cex.axis=1.5, cex.lab=2, cex=0.75)
+points(NLOO, pch=20, col="red")
+curve((700 / ((1+exp(b1-b2*x))**(1/b3))),0,20,lwd=3,add = TRUE)  # exact curve
+curve((700 / ((1+exp(nls.coef[1]-nls.coef[2]*x))**(1/nls.coef[3]))),
+      1,15,lwd=3,add = TRUE, col="blue",cex=2)                   # NLS curve
+curve((700 / ((1+exp(coef(nlts)[1]-coef(nlts)[2]*x))**(1/coef(nlts)[3]))),
+      1,15,lwd=3,add = TRUE,col="red")                           # NLTS curve
+#
+#========================== end ==================
+#
+#
+#
+#The following code provides an example to estimate stable distribution parameters: tail index (alpha) and skewness (beta) using MLE and MLEO presented in paper "Nonlinear Stable Least Trimmed Squares for Regression Models with Stable Errors", Section 3, Algorithm 5.
+ 
+rm(list=ls())
+library(stable)
+n=100
+pr=1
+eps=0.00001
+alpha=1.50;beta=0     # starting values
+
+y=rstable(n,alpha,beta,1,0)
+init.=stable.fit.mle(y)
+cutp= stable.fit.mle.restricted(y, c(init.[1],init.[2],1,0), restriction=c(0,0,1,1), param=1)
+if(round(cutp[2],4) < 1 & round(cutp[2],4)> -1){c=ceiling(2/cutp[1]);d=floor(n+1-(2/cutp[1]))}
+if(round(cutp[1],4)>=1 & round(cutp[2],4)==1 |round(cutp[2],4)==-1){c=ceiling(2/cutp[1]);d=floor(n+1-(2/cutp[1]))}
+if(round(cutp[1],4)<1 & round(cutp[2],4)==1 |round(cutp[2],4)==-1){c=ceiling(2/cutp[1]);d=floor(n+1-(2/cutp[1])) }
+
+# Define function to compute MLEO estimators
+data.area=as.data.frame(cbind(1:n,sort(y)))
+MLEO=function(x){
+    i=c:d
+    y=data.area[,2]
+    f3=function(i,a,b){log(dstable(y[i],a,b,1,0,pr))}
+    g=-(log(factorial(n)/(factorial(c-1)*factorial(n-d)))+(c-1)*log(pstable(y[c],x[1],x[2],1,0,pr))+(n-d)*log(1-         pstable(y[d], x[1],x[2],1,0,pr))+sum(sapply(i,f3,a=x[1],b=x[2])))
+  }
+
+#Define function to compute MLE estimators
+MLE=function(x){ f=-sum(log(dstable(data.area[,2][c:d],x[1],x[2],1,0))) }
+
+# Performance of MLE and MLEO
+theta <- nlminb(c(init.[1],init.[2]),MLE, lower = c(eps, -1+eps),upper = c(2-eps, 1-eps))      #MLE
+theta. <- nlminb(c(init.[1],init.[2]),MLEO, lower = c( eps, -1+eps), upper = c(2-eps, 1-eps)) #MLEO
+
+#Organization the results
+estim.alpha.beta<- data.frame(cbind(theta$par[1],theta$par[2],theta.$par[1],theta.$par[2]))
+colnames(estim.alpha.beta)<-c("MLE.a","MLE.b","MLEO.a","MLEO.b")
+rownames(estim.alpha.beta)<-" "
+estim.alpha.beta
+
+#Output:
+#     MLE.a     MLE.b   MLEO.a     MLEO.b
+#  1.676952 0.4210865 1.506665 0.06741948
+#
+#===============end ============================
+#
+#
+# This code provide an example to estimates the nonlinear regression coefficients using NLS, NOR, TLS, NL-SMSN(NL), and NSLTS. All these methods presented in the paper in Section 5.  
+rm(list=ls())
+library(xtable)
+library(stable)
+library(nlsmsn)
+
+n=100
+delta=0;gamma=1;beta=0;alpha=1.3
+theta1 <- 30
+theta2 <- 0.1
+p <- 2                                  # number of predictors
+alph=c(0.10,0.15,0.20,0.25) #Trimmed proportions
+pp=1                                   #parametrization
+
+
+  x=seq(0.2, 20, by = .20) #length(x)=n
+  e=rstable(n,alpha,beta,gamma,delta,pp)
+  y=theta1*exp(-theta2*x)+e 
+  all.data <- data.frame(cbind(y,x))
+
+  #==================== nl-smsn =====================
+  betas=c(30,0.1)
+  nlf<-function(x,betas){
+    yfit<- betas[1]*exp(-betas[2]*x)
+    return(yfit)
+  }
+  Rnlsmsn <- smsn.nl(y = y, x = x, z = x, betas = betas, sigma2 = gamma, 
+                        shape = beta, nu = 4, rho = -0.1, nlf = nlf, rho.func = 1, 
+                        reg.type = "He", criteria = TRUE, family = "Skew.t", 
+                        iter.max = 200)
+  param.nlsmsn  <- stable.fit.mle(Rnlsmsn$res, param=pp)
+  
+  #=================== nls =========================
+  m.nls=nls(y ~ a*exp(-b*x), start = list(a=30,b=0.1),data=all.data)
+  nls.coef <- coef(m.nls);nls.coef
+  re.nls <- y-coef(m.nls)[1]*exp(-coef(m.nls)[2]*x)
+  param.nls <- stable.fit.mle(re.nls, param=pp)
+  #================= nolan method ==================
+
+  MLE.nolan <- function(initial.p){
+    X.mat=all.data$x
+    Y.mat=all.data$y
+    i=1:n
+    log.stable=function(i,B1,B2){log(dstable(Y.mat[i]-(B1*exp(-B2*X.mat[i])),param.nls[1],param.nls[2],param.nls[3],0,pp))}
+    g=-sum(sapply(i,log.stable,B1=initial.p[1],B2=initial.p[2]))
+  }
+  nolan.es <- nlminb(nls.coef,MLE.nolan)
+  nolan.re <- all.data$y-nolan.es$par[1]*exp(-nolan.es$par[2]*all.data$x)
+  param.nolan <- stable.fit.mle(nolan.re, param=pp)
+  
+  #==================== TLS method =========================
+  cutp= stable.fit.mle(nolan.re, param=pp);cutp
+  
+  if(round(cutp[2],4) < 1 & round(cutp[2],4)> -1){
+    c=ceiling(2/cutp[1]);d=floor(n+1-(2/cutp[1]))
+  }
+  if(round(cutp[1],4)>=1 & round(cutp[2],4)==1 |round(cutp[2],4)==-1){
+    c=ceiling(2/cutp[1]);d=floor(n+1-(2/cutp[1]))
+  }
+  if(round(cutp[1],4)<1 & round(cutp[2],4)==1 |round(cutp[2],4)==-1){
+    c=ceiling(2/cutp[1]);d=floor(n+1-(2/cutp[1]))
+  }
+  c;d
+  
+  ord.data <- all.data[order(e),]
+  trimmed.data <- ord.data[c:d,]
+  rownames(trimmed.data)<- array(1:(d-c+1))
+  trim.nls=nls(y ~ a*exp(-b*x), start = list(a=30,b=0.1),data=trimmed.data)
+  resid.trim <- all.data$y-coef(trim.nls)[1]*exp(-coef(trim.nls)[2]*all.data$x)
+  
+  init.tls=stable.fit.mle(resid.trim, param=pp)
+  MLE.tls=function(par){
+    y=ord.data[,1]
+    x=ord.data[,2]
+    bet1=par[1]
+    bet2=par[2]
+    i=c:d
+    f3=function(i,beta1,beta2){log(dstable(y[i]-(beta1*exp(-beta2*x[i])),init.tls[1],init.tls[2],1,0,pp))}
+    g=-(log(factorial(n)/(factorial(c-1)*factorial(n-d)))+(c-1)*log(pstable(y[c]-(bet1*exp(-bet2*x[c])),init.tls[1],init.tls[2],1,0,pp))+(n-d)*log(1-pstable(y[d]-(bet1*exp(-bet2*x[d])),init.tls[1],init.tls[2],1,0,pp))+sum(sapply(i,f3,beta1=bet1,beta2=bet2)))
+  }
+  theta.tls <- nlminb(coef(trim.nls),MLE.tls)
+  tls.re <- all.data$y-theta.tls$par[1]*exp(-theta.tls$par[2]*all.data$x)
+  param.tls <- stable.fit.mle(tls.re, param=pp)
+  
+  #============= NLTS and NSLTS =============
+  n.trim <- d-c+1
+  coef1.LTS.mle <- c();coef2.LTS.mle <-c();coef1.mle. <-c(); coef2.mle. <-c();coef1.LTS.nls<-c();coef2.LTS.nls<-c()
+  for (I in 1:4) {
+    h <- ceiling(n.trim*(1-alph[I]))# Breakdown point
+    mt.sum<-matrix(ncol=2,nrow=10000)
+    B.coef <- matrix(ncol=2*p,nrow=10000)
+    for (J in 1:10000) {
+      H <- sample(1:(d-c+1),h)
+      data.trim <- trimmed.data[H,]
+      l.nls=nls(y ~ a*exp(-b*x), start = list(a=30,b=0.1),data=data.trim)
+      re <- trimmed.data$y-coef(l.nls)[1]*exp(-coef(l.nls)[2]*trimmed.data$x)
+      riord <- sort(abs(re))
+      B.coef[J,]= c(coef(l.nls),summary(l.nls)$parameters[,2])
+      mt.sum[J,]=c(sum(riord[1:h]^2),sum(re[H]^2))
+    } 
+    
+    result <- as.data.frame(cbind(B.coef,mt.sum))
+    resu=result[order(result[,5]),]
+    lts.nls <- as.numeric(resu[1,1:2])                   # NLTS solution using NLS fits
+    re.LTS <- trimmed.data$y-lts.nls[1]*exp(-lts.nls[2]*trimmed.data$x);names(re.LTS) <- array(1:(d-c+1))
+    param.lts.nls <- stable.fit.mle(re.LTS, param=pp)
+    riord <- sort(abs(re.LTS))
+    H <- as.numeric(names(riord[1:h]))
+    H=H[H>=c&H<=d]
+    
+    MLEO.=function(par){# MLEO of stable distribution parameters
+      al=par[1]
+      be =par[2]
+      i=1:length(re.LTS)
+      f3=function(i,a,b){log(dstable(re.LTS[i],a,b,gamma,0,pp))+(i-1)*log(pstable(re.LTS         [i],a,b,gamma,0,pp))+(n-i)*log(1-pstable(re.LTS[i],a,b,gamma,0,pp))}
+      f=sapply(i,f3,a=al,b=be)
+      g=-(sum(f))
+      g}
+    param.MLEO <- nlminb(c(alpha,beta),MLEO.);param.MLEO
+    initial <- c(lts.nls,param.MLEO$par[1],param.MLEO$par[2])
+
+
+    MLE.LTS=function(par){##MLEO of nonlinear regression coefficients
+    y=ord.data[,1]
+    x=ord.data[,2]
+    bet1=par[1]
+    bet2=par[2]
+    i=H
+    f3=function(i,beta1,beta2){log(dstable(y[i]-(beta1*exp(-beta2*x[i])),init.lts[1],init.lts[2],1,0,pp))}
+    g=-(log(factorial(n)/(factorial(c-1)*factorial(n-d)))+(c-1)*log(pstable(y[c]-(bet1*exp(-bet2*x[c])),init.lts[1],init.lts[2],1,0,pp))+(n-d)*log(1-pstable(y[d]-(bet1*exp(-bet2*x[d])),init.lts[1],init.lts[2],1,0,pp))+sum(sapply(i,f3,beta1=bet1,beta2=bet2)))
+  }
+    theta.lts <- nlminb(lts.nls,MLE.LTS)        # NLTS solution using MLE
+    re.mle <- all.data$y-theta.lts$par[1]*exp(-theta.lts$par[2]*all.data$x)
+    riord <- sort(abs(re.mle))
+    
+    MLE.=function(par){# MLE of nonlinear regression coefficients
+      y=all.data[,1]
+      x=all.data[,2]
+      bet1=par[1]
+      bet2=par[2]
+      i=1:n
+      f3=function(i,beta1,beta2){log(dstable(y[i]-(beta1*exp(-beta2*x[i])),init.lts[1],init.lts[2],1,0,pp))}
+      g=-(sum(sapply(i,f3,beta1=bet1,beta2=bet2)))
+    }
+    mle.lts <- nlminb(lts.nls,MLE.);mle.lts
+    re.mle. <- all.data$y-mle.lts$par[1]*exp(-mle.lts$par[2]*all.data$x)
+    param.mle. <- stable.fit.mle(re.mle.,param=pp)
+
+    coef1.LTS.mle[I]= theta.lts$par[1]
+    coef2.LTS.mle[I]= theta.lts$par[2]
+    coef1.mle.[I]     = mle.lts$par[1]
+    coef2.mle.[I]     = mle.lts$par[2]
+    coef1.LTS.nls[I]= lts.nls[1]
+    coef2.LTS.nls[I]= lts.nls[2]
+}
+
+#===== Report all output methods ===============
+Rnlsmsn$betas[1];Rnlsmsn$betas[2]
+nolan.es$par[1];nolan.es$par[2]
+theta.tls$par[1];theta.tls$par[2]
+
+lts<- data.frame(cbind(coef1.LTS.mle,coef2.LTS.mle,coef1.mle.,coef2.mle.,coef1.LTS.nls,coef2.LTS.nls))
+colnames(lts)<-c("MLEO.1","MLEO.2","MLE.1","MLE.2","NLS.1","NLS.2")
+rownames(lts)<-c("10%","15%","20%","25%")
+lts
+#
+#============== end ============================
+#
+#
